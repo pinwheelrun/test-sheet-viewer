@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Music Sheet Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="manifest" href="manifest.json">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js');
+  }
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    font-family: system-ui, -apple-system, sans-serif;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Top bar ── */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #111;
+    border-bottom: 1px solid #333;
+    z-index: 20;
+    flex-shrink: 0;
+  }
+
+  #open-btn {
+    background: #2a6fff;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  #open-btn:active { opacity: 0.8; }
+
+  #page-total {
+    font-size: 13px;
+    color: #666;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── Page strip in top bar ── */
+  #page-strip-wrap {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  #page-strip-wrap.visible { display: flex; }
+
+  .strip-nav {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 16px;
+    padding: 2px 4px;
+    cursor: pointer;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .strip-nav:disabled { opacity: 0.2; cursor: default; }
+  .strip-nav:not(:disabled):active { color: #fff; }
+
+  #page-strip {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .strip-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    background: #333;
+    border: 1.5px solid transparent;
+    color: #bbb;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .strip-btn.active {
+    border-color: #2a6fff;
+    background: #1a3a6a;
+    color: #fff;
+  }
+  .strip-btn:active { opacity: 0.7; }
+
+  #file-input { display: none; }
+
+  /* ── Viewer ── */
+  #viewer-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+  }
+
+  #pdf-canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    touch-action: none;
+  }
+
+  /* Tap zones — left 15% only, split vertically */
+  .tap-zone {
+    position: absolute;
+    left: 0;
+    width: 15%;
+    z-index: 10;
+    cursor: pointer;
+    display: none;
+  }
+  #tap-prev { top: 0; height: 30%; background: rgba(80, 180, 120, 0.15); }
+  #tap-next { top: 30%; bottom: 0; background: rgba(60, 130, 220, 0.15); }
+  .tap-zone.visible { display: block; }
+
+
+
+  /* Arrow hints — left side only */
+  .arrow-hint {
+    position: absolute;
+    left: 14px;
+    width: 15%;
+    font-size: 22px;
+    color: rgba(255,255,255,0.2);
+    pointer-events: none;
+    z-index: 12;
+    user-select: none;
+    text-align: left;
+  }
+  #arrow-prev { top: 10%; }
+  #arrow-next { top: 60%; }
+
+
+
+  /* ── Empty state ── */
+  #empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: #666;
+    pointer-events: none;
+  }
+  #empty-state svg { width: 64px; height: 64px; opacity: 0.4; }
+  #empty-state p { font-size: 15px; text-align: center; line-height: 1.5; }
+
+  /* ── Loading ── */
+  #loading {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    background: rgba(26,26,26,0.85);
+    z-index: 30;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 14px;
+    color: #aaa;
+  }
+  #loading.show { display: flex; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid #444;
+    border-top-color: #2a6fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <button id="open-btn">Open PDF</button>
+  <div id="page-strip-wrap">
+    <button class="strip-nav" id="strip-prev">‹</button>
+    <div id="page-strip"></div>
+    <button class="strip-nav" id="strip-next">›</button>
+  </div>
+  <span id="page-total"></span>
+  <input type="file" id="file-input" accept="application/pdf">
+</div>
+
+<div id="viewer-wrap">
+  <div id="empty-state">
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="12" y="6" width="36" height="46" rx="3" stroke="currentColor" stroke-width="2.5"/>
+      <path d="M20 20h24M20 28h24M20 36h16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="46" cy="46" r="10" fill="#1a1a1a" stroke="currentColor" stroke-width="2.5"/>
+      <path d="M43 46h6M46 43v6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <p>Tap <strong style="color:#aaa">Open PDF</strong> to load<br>your music sheet</p>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading…</span>
+  </div>
+
+  <canvas id="pdf-canvas"></canvas>
+
+  <div class="tap-zone" id="tap-prev"></div>
+  <div class="tap-zone" id="tap-next"></div>
+
+  <div class="arrow-hint" id="arrow-prev">‹</div>
+  <div class="arrow-hint" id="arrow-next">›</div>
+</div>
+
+
+
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  let pdfDoc = null;
+  let currentPage = 1;
+  let totalPages = 0;
+  let rendering = false;
+  let pendingPage = null;
+
+  const canvas = document.getElementById('pdf-canvas');
+  const ctx = canvas.getContext('2d');
+  const pageTotal = document.getElementById('page-total');
+  const emptyState = document.getElementById('empty-state');
+  const loading = document.getElementById('loading');
+  const pageStrip = document.getElementById('page-strip');
+  const stripWrap = document.getElementById('page-strip-wrap');
+  const stripPrev = document.getElementById('strip-prev');
+  const stripNext = document.getElementById('strip-next');
+
+  const arrowPrev = document.getElementById('arrow-prev');
+  const arrowNext = document.getElementById('arrow-next');
+  const viewerWrap = document.getElementById('viewer-wrap');
+
+  /* ── File open ── */
+  document.getElementById('open-btn').onclick = () =>
+    document.getElementById('file-input').click();
+
+  document.getElementById('file-input').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => loadPDF(ev.target.result);
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  async function loadPDF(data) {
+    loading.classList.add('show');
+    emptyState.style.display = 'none';
+    canvas.style.display = 'none';
+
+    try {
+      pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+      totalPages = pdfDoc.numPages;
+      currentPage = 1;
+
+      stripWrap.classList.add('visible');
+      document.getElementById('tap-prev').classList.add('visible');
+      document.getElementById('tap-next').classList.add('visible');
+      arrowPrev.style.display = '';
+      arrowNext.style.display = '';
+
+      await renderPage(currentPage);
+    } catch (err) {
+      alert('Could not open PDF: ' + err.message);
+    } finally {
+      loading.classList.remove('show');
+    }
+  }
+
+  async function renderPage(num) {
+    if (rendering) { pendingPage = num; return; }
+    rendering = true;
+
+    const page = await pdfDoc.getPage(num);
+    const vp0 = page.getViewport({ scale: 1 });
+    const wrap = viewerWrap.getBoundingClientRect();
+    const scale = Math.min(
+      wrap.width  / vp0.width,
+      wrap.height / vp0.height
+    ) * window.devicePixelRatio;
+
+    const vp = page.getViewport({ scale });
+    canvas.width  = vp.width;
+    canvas.height = vp.height;
+    canvas.style.width  = (vp.width  / window.devicePixelRatio) + 'px';
+    canvas.style.height = (vp.height / window.devicePixelRatio) + 'px';
+    canvas.style.display = 'block';
+
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+    currentPage = num;
+    updateUI();
+    rendering = false;
+
+    if (pendingPage !== null) {
+      const p = pendingPage; pendingPage = null;
+      renderPage(p);
+    }
+  }
+
+  function updateUI() {
+    pageTotal.textContent = `${totalPages}`;
+    arrowPrev.style.opacity = currentPage > 1 ? '1' : '0';
+    arrowNext.style.opacity = currentPage < totalPages ? '1' : '0';
+
+    // Calculate how many buttons fit in the available strip width
+    const stripWidth = pageStrip.offsetWidth;
+    const btnWidth = 32; // 28px button + 4px gap
+    const maxBtns = Math.max(1, Math.floor(stripWidth / btnWidth));
+    const half = Math.floor((maxBtns - 1) / 2);
+    const start = Math.max(1, currentPage - half);
+    const end   = Math.min(totalPages, start + maxBtns - 1);
+
+    pageStrip.innerHTML = '';
+    for (let i = start; i <= end; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'strip-btn' + (i === currentPage ? ' active' : '');
+      btn.textContent = i;
+      btn.onclick = () => goToPage(i);
+      pageStrip.appendChild(btn);
+    }
+
+    stripPrev.disabled = currentPage <= 1;
+    stripNext.disabled = currentPage >= totalPages;
+  }
+
+  function goToPage(n) {
+    if (!pdfDoc || n < 1 || n > totalPages) return;
+    renderPage(n);
+  }
+
+  /* ── Tap zones ── */
+  document.getElementById('tap-prev').onclick = () => goToPage(currentPage - 1);
+  document.getElementById('tap-next').onclick = () => goToPage(currentPage + 1);
+
+  /* ── Strip nav arrows ── */
+  stripPrev.onclick = () => goToPage(currentPage - 1);
+  stripNext.onclick = () => goToPage(currentPage + 1);
+
+  /* ── Keyboard ── */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   goToPage(currentPage - 1);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown')  goToPage(currentPage + 1);
+  });
+
+  /* ── Resize: re-render at new size ── */
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (pdfDoc) renderPage(currentPage); }, 200);
+  });
+</script>
+</body>
+</html>
