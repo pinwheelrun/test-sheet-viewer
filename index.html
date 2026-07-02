@@ -47,6 +47,7 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
+    touch-action: none;
   }
   #open-btn:active { opacity: 0.8; }
 
@@ -77,6 +78,7 @@
     cursor: pointer;
     line-height: 1;
     flex-shrink: 0;
+    touch-action: none;
   }
   .strip-nav:disabled { opacity: 0.2; cursor: default; }
   .strip-nav:not(:disabled):active { color: #fff; }
@@ -105,6 +107,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    touch-action: none;
   }
   .strip-btn.active {
     border-color: #2a6fff;
@@ -138,13 +141,13 @@
   .tap-zone {
     position: absolute;
     left: 0;
-    width: 15%;
+    width: 30%;
     z-index: 10;
     cursor: pointer;
     display: none;
   }
-  #tap-prev { top: 0; height: 30%; background: rgba(80, 180, 120, 0.15); }
-  #tap-next { top: 30%; bottom: 0; background: rgba(60, 130, 220, 0.15); }
+  #tap-prev { top: 0; height: 40%; background: rgba(80, 180, 120, 0.15); touch-action: none; }
+  #tap-next { top: 40%; bottom: 0; background: rgba(60, 130, 220, 0.15); touch-action: none; }
   .tap-zone.visible { display: block; }
 
 
@@ -355,7 +358,7 @@
       const btn = document.createElement('button');
       btn.className = 'strip-btn' + (i === currentPage ? ' active' : '');
       btn.textContent = i;
-      btn.onclick = () => goToPage(i);
+      btn.onpointerdown = (e) => { e.preventDefault(); goToPage(i); }
       pageStrip.appendChild(btn);
     }
 
@@ -369,12 +372,12 @@
   }
 
   /* ── Tap zones ── */
-  document.getElementById('tap-prev').onclick = () => goToPage(currentPage - 1);
-  document.getElementById('tap-next').onclick = () => goToPage(currentPage + 1);
+  document.getElementById('tap-prev').onpointerdown = (e) => { e.preventDefault(); goToPage(currentPage - 1); }
+  document.getElementById('tap-next').onpointerdown = (e) => { e.preventDefault(); goToPage(currentPage + 1); }
 
   /* ── Strip nav arrows ── */
-  stripPrev.onclick = () => goToPage(currentPage - 1);
-  stripNext.onclick = () => goToPage(currentPage + 1);
+  stripPrev.onpointerdown = (e) => { e.preventDefault(); goToPage(currentPage - 1); }
+  stripNext.onpointerdown = (e) => { e.preventDefault(); goToPage(currentPage + 1); }
 
   /* ── Keyboard ── */
   document.addEventListener('keydown', e => {
